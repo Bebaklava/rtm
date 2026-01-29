@@ -1,80 +1,76 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 void main() {
-  runApp(const SimonGameApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  // Принудительно альбомная ориентация
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]).then((_) {
+    runApp(const PianoGameApp());
+  });
 }
 
-class SimonGameApp extends StatelessWidget {
-  const SimonGameApp({super.key});
+class PianoGameApp extends StatelessWidget {
+  const PianoGameApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Повтори Мелодию',
+      title: 'Piano Simon',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: const Color(0xFF222222),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFF1E1E1E),
       ),
-      home: const SimonGamePage(),
+      home: const PianoGamePage(),
     );
   }
 }
 
-class SimonGamePage extends StatefulWidget {
-  const SimonGamePage({super.key});
+class PianoGamePage extends StatefulWidget {
+  const PianoGamePage({super.key});
 
   @override
-  State<SimonGamePage> createState() => _SimonGamePageState();
+  State<PianoGamePage> createState() => _PianoGamePageState();
 }
 
-class _SimonGamePageState extends State<SimonGamePage> {
+class _PianoGamePageState extends State<PianoGamePage> {
   final List<int> _sequence = [];
   final List<int> _userSequence = [];
   final Random _random = Random();
   final AudioPlayer _player = AudioPlayer();
   
-  // Пути к аудиофайлам (null = без звука)
-  final List<String?> _audioPaths = [null, null, null, null];
+  // 7 нот
+  final int _keysCount = 7;
+  // Если путь null - играем asset, иначе - файл пользователя
+  final List<String?> _userNotePaths = List.filled(7, null); 
+  final List<String> _noteNames = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
   
-  // Состояние игры
+  // Состояние
   bool _isPlayingSequence = false;
   bool _gameOver = false;
   int _score = 0;
-  
-  // Для анимации подсветки
-  int _activeLightIndex = -1;
-  String _statusText = "Нажми Старт!";
-
-  final List<Color> _baseColors = [
-    Colors.red[900]!,
-    Colors.green[900]!,
-    Colors.blue[900]!,
-    Colors.yellow[900]!,
-  ];
-
-  final List<Color> _brightColors = [
-    Colors.redAccent,
-    Colors.greenAccent,
-    Colors.blueAccent,
-    Colors.yellowAccent,
-  ];
-
-  final List<String> _colorNames = ["Красный", "Зеленый", "Синий", "Желтый"];
+  int _activeKeyIndex = -1; 
+  String _statusText = "Нажми СТАРТ";
 
   @override
   void dispose() {
     _player.dispose();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeRight,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
     super.dispose();
   }
-
-  // --- ЛОГИКА ИГРЫ ---
 
   void _startGame() {
     setState(() {
@@ -82,13 +78,13 @@ class _SimonGamePageState extends State<SimonGamePage> {
       _userSequence.clear();
       _score = 0;
       _gameOver = false;
-      _statusText = "Смотри...";
+      _statusText = "Слушай...";
     });
     _nextRound();
   }
 
   void _nextRound() async {
-    _sequence.add(_random.nextInt(4));
+    _sequence.add(_random.nextInt(_keysCount));
     setState(() {
       _userSequence.clear();
       _isPlayingSequence = true;
@@ -97,55 +93,51 @@ class _SimonGamePageState extends State<SimonGamePage> {
 
     await Future.delayed(const Duration(seconds: 1));
     for (int index in _sequence) {
-      await _activateButton(index);
-      await Future.delayed(const Duration(milliseconds: 300));
+      await _activateKey(index);
+      await Future.delayed(const Duration(milliseconds: 200));
     }
 
     setState(() {
       _isPlayingSequence = false;
-      _statusText = "Твой ход!";
+      _statusText = "Повтори!";
     });
   }
 
-  Future<void> _activateButton(int index) async {
-    // 1. Визуальная подсветка
-    setState(() {
-      _activeLightIndex = index;
-    });
-
-    // 2. Звук
+  Future<void> _activateKey(int index) async {
+    setState(() => _activeKeyIndex = index);
     _playSound(index);
-
-    // Ждем
-    await Future.delayed(const Duration(milliseconds: 400));
-    
-    // Выключаем подсветку
-    setState(() {
-      _activeLightIndex = -1;
-    });
+    await Future.delayed(const Duration(milliseconds: 300));
+    setState(() => _activeKeyIndex = -1);
   }
 
   Future<void> _playSound(int index) async {
-    String? path = _audioPaths[index];
-    if (path != null) {
-      try {
-        if (kIsWeb) {
-             // На вебе сложнее с локальными путями из пикера, пока пропустим или нужны URL
-             // Для простоты оставим пустым для веба, если файл не из ассетов
-        } else {
-             await _player.stop(); // Остановить предыдущий звук
-             await _player.play(DeviceFileSource(path));
+    try {
+      await _player.stop();
+      
+      String? userPath = _userNotePaths[index];
+      if (userPath != null) {
+        if (!kIsWeb) {
+           await _player.play(DeviceFileSource(userPath));
         }
-      } catch (e) {
-        debugPrint("Ошибка воспроизведения: $e");
+      } else {
+        await _player.play(AssetSource('note${index + 1}.mp3'));
       }
+    } catch (e) {
+      debugPrint("Error playing sound: $e");
     }
   }
 
-  void _handleButtonTap(int index) async {
-    if (_gameOver || _isPlayingSequence) return;
+  void _handleKeyTap(int index) async {
+    // Защита от случайных нажатий до старта или во время показа
+    if (_gameOver || _isPlayingSequence || _sequence.isEmpty) {
+        // Можно просто проиграть звук для фана, но не засчитывать в логику игры
+        if (_sequence.isEmpty && !_gameOver) {
+             _activateKey(index);
+        }
+        return;
+    }
 
-    _activateButton(index); // Светим и играем
+    _activateKey(index);
 
     if (index == _sequence[_userSequence.length]) {
       _userSequence.add(index);
@@ -153,8 +145,8 @@ class _SimonGamePageState extends State<SimonGamePage> {
       if (_userSequence.length == _sequence.length) {
         setState(() {
           _score++;
-          _statusText = "Отлично! Уровень $_score";
-          _isPlayingSequence = true; 
+          _statusText = "Супер! Уровень $_score";
+          _isPlayingSequence = true;
         });
         await Future.delayed(const Duration(seconds: 1));
         _nextRound();
@@ -167,54 +159,58 @@ class _SimonGamePageState extends State<SimonGamePage> {
     }
   }
 
-  // --- НАСТРОЙКИ ЗВУКА ---
-
   Future<void> _pickAudioFile(int index) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
-    );
-
+    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.audio);
     if (result != null && result.files.single.path != null) {
       setState(() {
-        _audioPaths[index] = result.files.single.path!;
+        _userNotePaths[index] = result.files.single.path!;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Звук для ${_colorNames[index]} выбран!")),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Звук для ${_noteNames[index]} заменен")));
     }
   }
 
-  void _showSettingsDialog() {
+  void _resetSound(int index) {
+    setState(() {
+      _userNotePaths[index] = null;
+    });
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Сброшен звук для ${_noteNames[index]}")));
+  }
+
+  void _showSettings() {
     showDialog(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text("Настройка звуков"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: List.generate(4, (index) {
-              return ListTile(
-                leading: CircleAvatar(backgroundColor: _baseColors[index]),
-                title: Text(_colorNames[index]),
-                subtitle: Text(_audioPaths[index] != null ? "Файл выбран" : "Без звука"),
-                trailing: IconButton(
-                  icon: const Icon(Icons.folder_open),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _pickAudioFile(index);
-                  },
-                ),
-              );
-            }),
+      builder: (ctx) => AlertDialog(
+        title: const Text("Настройка звуков"),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _keysCount,
+            itemBuilder: (ctx, i) => ListTile(
+              title: Text(_noteNames[i]),
+              subtitle: Text(_userNotePaths[i] != null ? "Пользовательский" : "Стандартный (Пианино)"),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_userNotePaths[i] != null)
+                    IconButton(
+                      icon: const Icon(Icons.refresh, color: Colors.orange),
+                      onPressed: () => _resetSound(i),
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.folder_open),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _pickAudioFile(i);
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Закрыть"),
-            )
-          ],
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -222,106 +218,94 @@ class _SimonGamePageState extends State<SimonGamePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Simon Says'),
-        backgroundColor: Colors.black45,
+        title: const Text('Piano Simon'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _showSettingsDialog,
-          )
+          IconButton(icon: const Icon(Icons.settings), onPressed: _showSettings)
         ],
       ),
       body: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              children: [
-                Text(
-                  _statusText,
-                  style: TextStyle(
-                    fontSize: 28, 
-                    color: _gameOver ? Colors.red : Colors.white,
-                    fontWeight: FontWeight.bold
-                  ),
-                ),
-                if (_gameOver)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: ElevatedButton(
-                      onPressed: _startGame,
-                      child: const Text("ИГРАТЬ СНОВА"),
+          // Info Area
+          Expanded(
+            flex: 2,
+            child: Container(
+              alignment: Alignment.center,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(_statusText, style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
+                  if (_gameOver)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: ElevatedButton(
+                        onPressed: _startGame,
+                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+                        child: const Text("ЗАНОВО", style: TextStyle(fontSize: 18)),
+                      ),
                     ),
-                  )
-              ],
+                  if (!_gameOver && _score == 0 && _sequence.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: ElevatedButton(
+                        onPressed: _startGame,
+                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
+                        child: const Text("СТАРТ", style: TextStyle(fontSize: 18)),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           
-          const SizedBox(height: 20),
-
-          Center(
-            child: SizedBox(
-              width: 300,
-              height: 300,
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                ),
-                itemCount: 4,
-                itemBuilder: (context, index) {
-                  return GestureDetector(
-                    onTapDown: (_) {
-                       if (!_isPlayingSequence && !_gameOver) {
-                         setState(() => _activeLightIndex = index);
-                       }
-                    },
-                    onTapUp: (_) {
-                       if (!_isPlayingSequence && !_gameOver) {
-                         setState(() => _activeLightIndex = -1);
-                         _handleButtonTap(index);
-                       }
-                    },
-                    onTapCancel: () {
-                       setState(() => _activeLightIndex = -1);
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 100),
-                      decoration: BoxDecoration(
-                        color: _activeLightIndex == index 
-                            ? _brightColors[index] 
-                            : _baseColors[index],
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          if (_activeLightIndex == index)
-                            BoxShadow(
-                              color: _brightColors[index].withOpacity(0.6),
-                              blurRadius: 20,
-                              spreadRadius: 5,
-                            )
-                        ],
+          // Piano Keys Area
+          Expanded(
+            flex: 3,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              color: Colors.black,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: List.generate(_keysCount, (index) {
+                  bool isActive = _activeKeyIndex == index;
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: GestureDetector(
+                        onTapDown: (_) {
+                          if (!_isPlayingSequence && !_gameOver) setState(() => _activeKeyIndex = index);
+                        },
+                        onTapUp: (_) {
+                          if (!_isPlayingSequence && !_gameOver) {
+                            setState(() => _activeKeyIndex = -1);
+                            _handleKeyTap(index);
+                          }
+                        },
+                        onTapCancel: () => setState(() => _activeKeyIndex = -1),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 100),
+                          decoration: BoxDecoration(
+                            color: isActive ? Colors.yellowAccent : Colors.white,
+                            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(10)),
+                            boxShadow: isActive ? [BoxShadow(color: Colors.yellow.withOpacity(0.5), blurRadius: 15, spreadRadius: 2)] : [],
+                          ),
+                          alignment: Alignment.bottomCenter,
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: Text(
+                            _noteNames[index],
+                            style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                          ),
+                        ),
                       ),
                     ),
                   );
-                },
+                }),
               ),
             ),
           ),
-          
-          const SizedBox(height: 50),
-          
-          if (!_gameOver && _score == 0 && _sequence.isEmpty)
-             ElevatedButton(
-                onPressed: _startGame,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                  textStyle: const TextStyle(fontSize: 20),
-                ),
-                child: const Text("СТАРТ"),
-              ),
         ],
       ),
     );
