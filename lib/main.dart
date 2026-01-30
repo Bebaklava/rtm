@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Принудительно альбомная ориентация
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
@@ -23,7 +22,7 @@ class PianoGameApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Piano Simon',
+      title: 'Повтори мелодию',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -45,24 +44,23 @@ class _PianoGamePageState extends State<PianoGamePage> {
   final List<int> _sequence = [];
   final List<int> _userSequence = [];
   final Random _random = Random();
-  final AudioPlayer _player = AudioPlayer();
-  
-  // 7 нот
+  final List<AudioPlayer> _players = List.generate(7, (_) => AudioPlayer());
+
   final int _keysCount = 7;
-  // Если путь null - играем asset, иначе - файл пользователя
-  final List<String?> _userNotePaths = List.filled(7, null); 
+  final List<String?> _userNotePaths = List.filled(7, null);
   final List<String> _noteNames = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
-  
-  // Состояние
+
   bool _isPlayingSequence = false;
   bool _gameOver = false;
   int _score = 0;
-  int _activeKeyIndex = -1; 
-  String _statusText = "Нажми СТАРТ";
+  int _activeKeyIndex = -1;
+  String _statusText = "Нажмите старт";
 
   @override
   void dispose() {
-    _player.dispose();
+    for (var player in _players) {
+      player.dispose();
+    }
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeRight,
       DeviceOrientation.landscapeLeft,
@@ -99,7 +97,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
 
     setState(() {
       _isPlayingSequence = false;
-      _statusText = "Повтори!";
+      _statusText = "Повторяй!";
     });
   }
 
@@ -110,17 +108,18 @@ class _PianoGamePageState extends State<PianoGamePage> {
     setState(() => _activeKeyIndex = -1);
   }
 
-  Future<void> _playSound(int index) async {
+  void _playSound(int index) {
     try {
-      await _player.stop();
-      
+      final player = _players[index];
+      player.stop();
+
       String? userPath = _userNotePaths[index];
       if (userPath != null) {
         if (!kIsWeb) {
-           await _player.play(DeviceFileSource(userPath));
+           player.play(DeviceFileSource(userPath));
         }
       } else {
-        await _player.play(AssetSource('note${index + 1}.mp3'));
+        player.play(AssetSource('note${index + 1}.mp3'));
       }
     } catch (e) {
       debugPrint("Error playing sound: $e");
@@ -128,9 +127,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
   }
 
   void _handleKeyTap(int index) async {
-    // Защита от случайных нажатий до старта или во время показа
     if (_gameOver || _isPlayingSequence || _sequence.isEmpty) {
-        // Можно просто проиграть звук для фана, но не засчитывать в логику игры
         if (_sequence.isEmpty && !_gameOver) {
              _activateKey(index);
         }
@@ -141,7 +138,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
 
     if (index == _sequence[_userSequence.length]) {
       _userSequence.add(index);
-      
+
       if (_userSequence.length == _sequence.length) {
         setState(() {
           _score++;
@@ -154,7 +151,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
     } else {
       setState(() {
         _gameOver = true;
-        _statusText = "ОШИБКА! Счет: $_score";
+        _statusText = "Ошибка! Счет: $_score";
       });
     }
   }
@@ -189,7 +186,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
             itemCount: _keysCount,
             itemBuilder: (ctx, i) => ListTile(
               title: Text(_noteNames[i]),
-              subtitle: Text(_userNotePaths[i] != null ? "Пользовательский" : "Стандартный (Пианино)"),
+              subtitle: Text(_userNotePaths[i] != null ? "Используется кастомный" : "По умолчанию (Пианино)"),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -218,7 +215,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Piano Simon'),
+        title: const Text('Повтори мелодию'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         actions: [
@@ -233,33 +230,34 @@ class _PianoGamePageState extends State<PianoGamePage> {
             child: Container(
               alignment: Alignment.center,
               padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 20,
+                runSpacing: 10,
                 children: [
-                  Text(_statusText, style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)),
-                  if (_gameOver)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: ElevatedButton(
-                        onPressed: _startGame,
-                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
-                        child: const Text("ЗАНОВО", style: TextStyle(fontSize: 18)),
+                  Text(_statusText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold)
+                  ),
+                  if (_gameOver || (!_gameOver && _score == 0 && _sequence.isEmpty))
+                    ElevatedButton(
+                      onPressed: _startGame,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                        backgroundColor: Colors.blueAccent,
+                        foregroundColor: Colors.white,
                       ),
-                    ),
-                  if (!_gameOver && _score == 0 && _sequence.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: ElevatedButton(
-                        onPressed: _startGame,
-                        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15)),
-                        child: const Text("СТАРТ", style: TextStyle(fontSize: 18)),
+                      child: Text(
+                        _gameOver ? "Заново" : "Старт",
+                        style: const TextStyle(fontSize: 18)
                       ),
                     ),
                 ],
               ),
             ),
           ),
-          
+
           // Piano Keys Area
           Expanded(
             flex: 3,
