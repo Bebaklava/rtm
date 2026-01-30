@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:soundpool/soundpool.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -44,23 +44,50 @@ class _PianoGamePageState extends State<PianoGamePage> {
   final List<int> _sequence = [];
   final List<int> _userSequence = [];
   final Random _random = Random();
-  final List<AudioPlayer> _players = List.generate(7, (_) => AudioPlayer());
+
+  late Soundpool _pool;
+  final List<int> _soundIds = List.filled(7, -1);
 
   final int _keysCount = 7;
-  final List<String?> _userNotePaths = List.filled(7, null);
-  final List<String> _noteNames = ["Do", "Re", "Mi", "Fa", "Sol", "La", "Si"];
+  final List<String> _noteNames = ['Do', 'Re', 'Mi', 'Fa', 'Sol', 'La', 'Si'];
 
   bool _isPlayingSequence = false;
   bool _gameOver = false;
   int _score = 0;
   int _activeKeyIndex = -1;
-  String _statusText = "Нажмите старт";
+  String _statusText = 'Нажмите старт';
+
+  @override
+  void initState() {
+    super.initState();
+    _initPool();
+  }
+
+  void _initPool() {
+    _pool = Soundpool.fromOptions(options: const SoundpoolOptions(streamType: StreamType.music));
+    _loadSounds();
+  }
+
+  Future<void> _loadSounds() async {
+    for (int i = 0; i < _keysCount; i++) {
+      try {
+        int soundId = await rootBundle.load('assets/note${i + 1}.mp3').then((ByteData soundData) {
+          return _pool.load(soundData);
+        });
+        if (mounted) {
+          setState(() {
+            _soundIds[i] = soundId;
+          });
+        }
+      } catch (e) {
+        debugPrint('Error loading sound $i: $e');
+      }
+    }
+  }
 
   @override
   void dispose() {
-    for (var player in _players) {
-      player.dispose();
-    }
+    _pool.release();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeRight,
       DeviceOrientation.landscapeLeft,
@@ -76,7 +103,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
       _userSequence.clear();
       _score = 0;
       _gameOver = false;
-      _statusText = "Слушай...";
+      _statusText = 'Слушай...';
     });
     _nextRound();
   }
@@ -86,7 +113,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
     setState(() {
       _userSequence.clear();
       _isPlayingSequence = true;
-      _statusText = "Запоминай!";
+      _statusText = 'Запоминай!';
     });
 
     await Future.delayed(const Duration(seconds: 1));
@@ -97,32 +124,21 @@ class _PianoGamePageState extends State<PianoGamePage> {
 
     setState(() {
       _isPlayingSequence = false;
-      _statusText = "Повторяй!";
+      _statusText = 'Повторяй!';
     });
   }
 
   Future<void> _activateKey(int index) async {
+    if (!mounted) return;
     setState(() => _activeKeyIndex = index);
     _playSound(index);
     await Future.delayed(const Duration(milliseconds: 300));
-    setState(() => _activeKeyIndex = -1);
+    if (mounted) setState(() => _activeKeyIndex = -1);
   }
 
   void _playSound(int index) {
-    try {
-      final player = _players[index];
-      player.stop();
-
-      String? userPath = _userNotePaths[index];
-      if (userPath != null) {
-        if (!kIsWeb) {
-           player.play(DeviceFileSource(userPath));
-        }
-      } else {
-        player.play(AssetSource('note${index + 1}.mp3'));
-      }
-    } catch (e) {
-      debugPrint("Error playing sound: $e");
+    if (_soundIds[index] != -1) {
+      _pool.play(_soundIds[index]);
     }
   }
 
@@ -142,7 +158,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
       if (_userSequence.length == _sequence.length) {
         setState(() {
           _score++;
-          _statusText = "Супер! Уровень $_score";
+          _statusText = 'Супер! Уровень $_score';
           _isPlayingSequence = true;
         });
         await Future.delayed(const Duration(seconds: 1));
@@ -151,62 +167,20 @@ class _PianoGamePageState extends State<PianoGamePage> {
     } else {
       setState(() {
         _gameOver = true;
-        _statusText = "Ошибка! Счет: $_score";
+        _statusText = 'Ошибка! Счет: $_score';
       });
     }
-  }
-
-  Future<void> _pickAudioFile(int index) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (result != null && result.files.single.path != null) {
-      setState(() {
-        _userNotePaths[index] = result.files.single.path!;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Звук для ${_noteNames[index]} заменен")));
-    }
-  }
-
-  void _resetSound(int index) {
-    setState(() {
-      _userNotePaths[index] = null;
-    });
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Сброшен звук для ${_noteNames[index]}")));
   }
 
   void _showSettings() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Настройка звуков"),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _keysCount,
-            itemBuilder: (ctx, i) => ListTile(
-              title: Text(_noteNames[i]),
-              subtitle: Text(_userNotePaths[i] != null ? "Используется кастомный" : "По умолчанию (Пианино)"),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_userNotePaths[i] != null)
-                    IconButton(
-                      icon: const Icon(Icons.refresh, color: Colors.orange),
-                      onPressed: () => _resetSound(i),
-                    ),
-                  IconButton(
-                    icon: const Icon(Icons.folder_open),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _pickAudioFile(i);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+        title: const Text('Настройка звуков'),
+        content: const Text('Включен режим низкой задержки.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('ОК'))
+        ],
       ),
     );
   }
@@ -224,7 +198,6 @@ class _PianoGamePageState extends State<PianoGamePage> {
       ),
       body: Column(
         children: [
-          // Info Area
           Expanded(
             flex: 2,
             child: Container(
@@ -249,7 +222,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
                         foregroundColor: Colors.white,
                       ),
                       child: Text(
-                        _gameOver ? "Заново" : "Старт",
+                        _gameOver ? 'Заново' : 'Старт',
                         style: const TextStyle(fontSize: 18)
                       ),
                     ),
@@ -257,8 +230,6 @@ class _PianoGamePageState extends State<PianoGamePage> {
               ),
             ),
           ),
-
-          // Piano Keys Area
           Expanded(
             flex: 3,
             child: Container(
