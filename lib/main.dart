@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:soundpool/soundpool.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_soloud/flutter_soloud.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,8 +43,8 @@ class _PianoGamePageState extends State<PianoGamePage> {
   final List<int> _userSequence = [];
   final Random _random = Random();
 
-  late Soundpool _pool;
-  final List<int> _soundIds = List.filled(7, -1);
+  final List<AudioSource?> _audioSources = List.filled(7, null);
+  bool _isSoloudInited = false;
 
   final int _keysCount = 7;
   final List<String> _noteNames = ['Do', 'Re', 'Mi', 'Fa', 'Sol', 'La', 'Si'];
@@ -55,28 +53,36 @@ class _PianoGamePageState extends State<PianoGamePage> {
   bool _gameOver = false;
   int _score = 0;
   int _activeKeyIndex = -1;
-  String _statusText = 'Нажмите старт';
+  String _statusText = 'Загрузка звуков...';
 
   @override
   void initState() {
     super.initState();
-    _initPool();
+    _initSoloud();
   }
 
-  void _initPool() {
-    _pool = Soundpool.fromOptions(options: const SoundpoolOptions(streamType: StreamType.music));
-    _loadSounds();
+  Future<void> _initSoloud() async {
+    try {
+      await SoLoud.instance.init();
+      if (mounted) {
+        setState(() {
+          _isSoloudInited = true;
+          _statusText = 'Нажмите Старт';
+        });
+        _loadSounds();
+      }
+    } catch (e) {
+      debugPrint('SoLoud init error: $e');
+    }
   }
 
   Future<void> _loadSounds() async {
     for (int i = 0; i < _keysCount; i++) {
       try {
-        int soundId = await rootBundle.load('assets/note${i + 1}.mp3').then((ByteData soundData) {
-          return _pool.load(soundData);
-        });
+        final source = await SoLoud.instance.loadAsset('assets/note${i + 1}.mp3');
         if (mounted) {
           setState(() {
-            _soundIds[i] = soundId;
+            _audioSources[i] = source;
           });
         }
       } catch (e) {
@@ -87,7 +93,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
 
   @override
   void dispose() {
-    _pool.release();
+    SoLoud.instance.deinit();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeRight,
       DeviceOrientation.landscapeLeft,
@@ -98,12 +104,13 @@ class _PianoGamePageState extends State<PianoGamePage> {
   }
 
   void _startGame() {
+    if (!_isSoloudInited) return;
     setState(() {
       _sequence.clear();
       _userSequence.clear();
       _score = 0;
       _gameOver = false;
-      _statusText = 'Слушай...';
+      _statusText = 'Слушайте...';
     });
     _nextRound();
   }
@@ -113,7 +120,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
     setState(() {
       _userSequence.clear();
       _isPlayingSequence = true;
-      _statusText = 'Запоминай!';
+      _statusText = 'Запоминайте!';
     });
 
     await Future.delayed(const Duration(seconds: 1));
@@ -124,7 +131,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
 
     setState(() {
       _isPlayingSequence = false;
-      _statusText = 'Повторяй!';
+      _statusText = 'Повторяйте!';
     });
   }
 
@@ -137,8 +144,9 @@ class _PianoGamePageState extends State<PianoGamePage> {
   }
 
   void _playSound(int index) {
-    if (_soundIds[index] != -1) {
-      _pool.play(_soundIds[index]);
+    final source = _audioSources[index];
+    if (source != null && _isSoloudInited) {
+      SoLoud.instance.play(source);
     }
   }
 
@@ -158,7 +166,7 @@ class _PianoGamePageState extends State<PianoGamePage> {
       if (_userSequence.length == _sequence.length) {
         setState(() {
           _score++;
-          _statusText = 'Супер! Уровень $_score';
+          _statusText = 'Верно! Уровень $_score';
           _isPlayingSequence = true;
         });
         await Future.delayed(const Duration(seconds: 1));
@@ -167,22 +175,9 @@ class _PianoGamePageState extends State<PianoGamePage> {
     } else {
       setState(() {
         _gameOver = true;
-        _statusText = 'Ошибка! Счет: $_score';
+        _statusText = 'Ошибка! Счёт: $_score';
       });
     }
-  }
-
-  void _showSettings() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Настройка звуков'),
-        content: const Text('Включен режим низкой задержки.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('ОК'))
-        ],
-      ),
-    );
   }
 
   @override
@@ -192,9 +187,6 @@ class _PianoGamePageState extends State<PianoGamePage> {
         title: const Text('Повтори мелодию'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        actions: [
-          IconButton(icon: const Icon(Icons.settings), onPressed: _showSettings)
-        ],
       ),
       body: Column(
         children: [
@@ -259,7 +251,6 @@ class _PianoGamePageState extends State<PianoGamePage> {
                           decoration: BoxDecoration(
                             color: isActive ? Colors.yellowAccent : Colors.white,
                             borderRadius: const BorderRadius.vertical(bottom: Radius.circular(10)),
-                            boxShadow: isActive ? [BoxShadow(color: Colors.yellow.withOpacity(0.5), blurRadius: 15, spreadRadius: 2)] : [],
                           ),
                           alignment: Alignment.bottomCenter,
                           padding: const EdgeInsets.only(bottom: 20),
